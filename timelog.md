@@ -1,7 +1,7 @@
 ## Monday June 22, 2026
-Start: [your actual start time] MST
-Stop: [your actual stop time] MST
-Total: [duration]
+Start: 3:56pm MST
+Stop: 5:04pm MST
+Total: 1 hr 8 min
 
 Tasks:
   - Filled out CSE 310 Module Plan form (selected module, description, schedule, risks) ✅
