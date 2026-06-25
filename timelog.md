@@ -10,7 +10,6 @@ Tasks:
   - Installed rust-analyzer extension in VS Code ✅
   - Troubleshot and resolved linker not found error (VS Installer was mid-update) ✅
   - Created rooted-cli project with cargo new, ran first program successfully ✅
-<<<<<<< HEAD
 
   ## Tuesday June 23, 2026
 Morning Commute and After Work
@@ -30,5 +29,3 @@ Tasks:
   - Defined CareLog struct with all 5 fields ✅
   - Created test CareLog instance, printed fields via println! ✅
   - Practiced struct literal syntax and field access (dot notation) ✅
-=======
->>>>>>> 07813dbd2eb67c50ac1eb7eca1777c567234cd30
