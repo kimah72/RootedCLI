@@ -47,3 +47,16 @@ Tasks:
   - Converted main() to async with #[tokio::main] ✅
   - Wrote get_plants() async function: builds URL, sends GET request, deserializes JSON into Vec<Plant> using Result and the ? operator ✅
   - Called get_plants() from main(), confirmed live connection to AWS backend, successfully retrieved 34 real plants ✅
+
+  ## Saturday June 27, 2026
+Start: 8:10am MST
+Stop: 9:41am MST
+Total: ~1h 31m
+
+Tasks:
+  - Built list command: looped over Vec<Plant>, printed formatted output ✅
+  - Added if/else conditional to handle empty watch_for field gracefully ✅
+  - Added impl Plant block with display_name() method (struct + impl stretch challenge) ✅
+  - Wired display_name() into the list loop output ✅
+  - Added comments throughout main.rs explaining structs, serde, async, ownership/borrowing concepts ✅
+  - Explored Cognito sub vs. login email distinction; decided to defer real auth, documented as future work ✅

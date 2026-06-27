@@ -90,12 +90,12 @@ async fn main() {
             // so we can still use `plants` after the loop if needed,
             // rather than the loop taking ownership of it.
             for plant in &plants {
-                // Conditional: if watch_for is empty, show a friendly placeholder
+                // Conditional: if care_instructions is empty, show a friendly placeholder
                 // instead of printing nothing after the dash.
-                if plant.watch_for.is_empty() {
-                println!("{} - watch for: (none yet)", plant.display_name());
+                if plant.care_instructions.is_empty() {
+                println!("{} - Care Instructions: (none yet)", plant.display_name());
                 } else {
-                    println!("{} - watch for: {}", plant.display_name(), plant.watch_for);
+                    println!("{} - Care Instructions: {}", plant.display_name(), plant.care_instructions);
                 }
             }
         }
