@@ -154,7 +154,8 @@ async fn main() {
     let sub = match cognito_login(email, password).await {
         Ok(s) => s,
         Err(e) => {
-            println!("Login failed: {}", e);
+            println!("Login failed. Please check your email and password and try again.");
+            println!("(Error details: {})", e);
             return;
         }
     };
@@ -205,15 +206,19 @@ async fn main() {
             if selection == 0 {
                 println!("Logging {} for all plants...", care_type);
                 for plant in &plants {
-                    log_care(&plant.plant_id, care_type, notes).await.unwrap();
-                    println!("  ✓ {}", plant.display_name());
+                    match log_care(&plant.plant_id, care_type, notes).await {
+                        Ok(_) => println!("  ✓ {}", plant.display_name()),
+                        Err(e) => println!("  ✗ {} (failed: {})", plant.display_name(), e),
+                    }
                 }
                 println!("Done! All plants logged.");
             } else if selection >= 1 && selection <= plants.len() {
                 // Vec is zero-indexed, so subtract 1 to get the right plant
                 let plant = &plants[selection - 1];
-                log_care(&plant.plant_id, care_type, notes).await.unwrap();
-                println!("Logged {} for {}.", care_type, plant.display_name());
+                match log_care(&plant.plant_id, care_type, notes).await {
+                    Ok(_) => println!("✓ Logged {} for {}.", care_type, plant.display_name()),
+                    Err(e) => println!("✗ Failed to log {} for {}: {}", care_type, plant.display_name(), e),
+                }
             } else {
                 println!("Invalid selection.");
             }
