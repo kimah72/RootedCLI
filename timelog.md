@@ -60,3 +60,24 @@ Tasks:
   - Wired display_name() into the list loop output ✅
   - Added comments throughout main.rs explaining structs, serde, async, ownership/borrowing concepts ✅
   - Explored Cognito sub vs. login email distinction; decided to defer real auth, documented as future work ✅
+
+  ## Tuesday June 30, 2026
+Morning Commute
+Total: 1h 15m
+
+Tasks:
+  - Read Rust Book Chapter 5 (Structs and Method Syntax) ✅
+
+## Tuesday June 30, 2026 (afternoon session)
+Start: 2:40pm MST
+Stop: 4:23pm MST
+Total: 1h 43m
+
+Tasks:
+  - Added Cognito USER_PASSWORD_AUTH login flow (email + password prompt → sub extraction via JWT decode) ✅
+  - Added base64, uuid, chrono dependencies to Cargo.toml ✅
+  - Built log_care() function: constructs CareLog, POSTs to /carelogs ✅
+  - Added notes prompt to log_care for optional care notes ✅
+  - Built interactive plant selection (numbered list, single plant or log-all) ✅
+  - Tested log-all: successfully posted care logs to all 34 plants simultaneously ✅
+  - Confirmed all entries in DynamoDB ✅
