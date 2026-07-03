@@ -21,7 +21,7 @@ care for 30+ named plants one at a time through a mobile app is tedious. A singl
 terminal command can log care for every plant simultaneously, something neither the
 web nor mobile app currently supports.
 
-[Software Demo Video](http://youtube.link.goes.here)
+[Software Demo Video - RootedCLI](https://youtu.be/jx2Z2NPax2c)
 
 # Development Environment
 
