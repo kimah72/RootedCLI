@@ -82,3 +82,21 @@ Tasks:
   - Added error handling for log_care calls (match instead of unwrap, ✓/✗ output) ✅
   - Improved Cognito login error messages ✅
   - Confirmed all entries in DynamoDB ✅
+
+  ## Friday July 3, 2026
+Start: 3:28pm MST
+Stop: 5:48pm MST
+Total: 2h 20m
+
+Tasks:
+  - Added is_overdue() and watering_threshold() impl methods on CareLog ✅
+  - Added get_care_logs() async function ✅
+  - Added seasonal watering threshold (7/10/14 days by season) ✅
+  - Filtered overdue check to Watering logs only ✅
+  - Fixed ISO timestamp parsing for DynamoDB date format ✅
+  - Made logging optional (y/n prompt) ✅
+  - Added dotenv support for credentials (.env file, no more typing email/password) ✅
+  - Trimmed comments to appropriate density ✅
+  - Wrote and pushed README.md ✅
+  - Recorded demo video ✅
+  - Filled out Module Submit form ✅
