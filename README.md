@@ -69,7 +69,3 @@ is not yet available. Use the following test credentials to run the application:
 - Add a `due` command that lists all plants currently overdue for any
   care type, not just watering
 - Support filtering the plant list by care type, overdue status, or species
-- Explore compiling RootedCLI to WebAssembly for potential integration
-  into the Rooted Upright web app
-- Deploy Rooted Upright web app publicly to enable self-registration
-  for test users

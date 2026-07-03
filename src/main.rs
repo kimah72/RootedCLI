@@ -6,6 +6,7 @@ use base64::Engine;
 use std::io::{self, Write};
 // Datelike provides .month() on chrono date types.
 use chrono::Datelike;
+use std::env;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Plant {
@@ -170,21 +171,26 @@ async fn get_care_logs(plant_id: &str) -> Result<Vec<CareLog>, reqwest::Error> {
 // tokio::main drives the async runtime so main() can use .await.
 #[tokio::main]
 async fn main() {
-    // flush() ensures prompts appear before the user starts typing,
-    // since print! doesn't add a newline to trigger automatic flushing.
-    print!("Email: ");
-    io::stdout().flush().unwrap();
-    let mut email = String::new();
-    io::stdin().read_line(&mut email).expect("Failed to read email");
-    let email = email.trim();
+    // Load credentials from .env file if present, otherwise fall back to terminal prompt.
+    dotenv::dotenv().ok();
 
-    print!("Password: ");
-    io::stdout().flush().unwrap();
-    let mut password = String::new();
-    io::stdin().read_line(&mut password).expect("Failed to read password");
-    let password = password.trim();
+    let email = env::var("EMAIL").unwrap_or_else(|_| {
+        print!("Email: ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Failed to read email");
+        input.trim().to_string()
+    });
 
-    let sub = match cognito_login(email, password).await {
+    let password = env::var("PASSWORD").unwrap_or_else(|_| {
+        print!("Password: ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Failed to read password");
+        input.trim().to_string()
+    });
+
+    let sub = match cognito_login(&email, &password).await {  // <-- this stays
         Ok(s) => s,
         Err(e) => {
             println!("Login failed. Please check your email and password and try again.");
