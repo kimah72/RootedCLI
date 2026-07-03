@@ -1,18 +1,16 @@
-// Import the Serialize and Deserialize traits from the serde crate.
-// These let the structs convert to and from JSON automatically.
+// Serde traits for automatic JSON serialization and deserialization.
 use serde::{Serialize, Deserialize};
+// Engine trait required to call .decode() on the base64 engine.
 use base64::Engine;
+// io for terminal input; Write trait needed for flush().
 use std::io::{self, Write};
-// Plant represents one plant record from the Rooted Upright DynamoDB table.
-// #[derive(...)] auto-generates code so this struct can:
-//   - Serialize: convert into JSON
-//   - Deserialize: convert from JSON
-//   - Debug: print the whole struct with {:?} for debugging
+// Datelike provides .month() on chrono date types.
+use chrono::Datelike;
+
 #[derive(Serialize, Deserialize, Debug)]
 struct Plant {
-    // The backend uses camelCase field names (e.g. "plantId"),
-    // but Rust convention is snake_case (e.g. plant_id).
-    // #[serde(rename = "...")] tells serde how to map between the two.
+    // Backend uses camelCase; Rust convention is snake_case.
+    // #[serde(rename)] maps between the two automatically.
     #[serde(rename = "plantId")]
     plant_id: String,
     #[serde(rename = "userId")]
@@ -30,18 +28,15 @@ struct Plant {
     #[serde(rename = "imageUrl")]
     image_url: String,
 }
-// impl blocks hold the behavior (methods) for a struct.
-// The struct itself only holds data; impl is where we define what it can do.
+
+// impl separates behavior from data. Plant holds the shape; impl holds what it can do.
 impl Plant {
-    // &self means this method borrows the Plant it's called on,
-    // it only reads the plant's fields, it doesn't take ownership of them.
-    // Returns a formatted String combining name and cultivar.
+    // &self borrows the Plant without taking ownership, reads fields only.
     fn display_name(&self) -> String {
         format!("{} ({})", self.name, self.cultivar)
     }
 }
-// CareLog represents one care event (watering, fertilizing, etc.)
-// from the CareLogs DynamoDB table. Same serde pattern as Plant.
+
 #[derive(Serialize, Deserialize, Debug)]
 struct CareLog {
     #[serde(rename = "logId")]
@@ -54,17 +49,52 @@ struct CareLog {
     #[serde(rename = "dateLogged")]
     date_logged: String,
 }
+
+impl CareLog {
+    // Associated function (no &self) since it returns a seasonal constant,
+    // not something specific to one CareLog instance.
+    fn watering_threshold() -> i64 {
+        let month = chrono::Local::now().month();
+        match month {
+            11 | 12 | 1 | 2 => 14, // Winter: every 14 days
+            6 | 7 | 8 | 9 => 7,    // Summer: every 7 days
+            _ => 10,                // Spring/Fall: every 10 days
+        }
+    }
+
+    // Returns true if enough days have passed since this log entry
+    // to warrant care again, based on the seasonal threshold.
+    fn is_overdue(&self) -> bool {
+        let threshold = CareLog::watering_threshold();
+        // DynamoDB stores timestamps as ISO 8601 (e.g. "2026-07-01T03:01:42.629Z").
+        // parse_from_rfc3339 handles this format; .map() extracts just the date portion.
+        let logged = chrono::DateTime::parse_from_rfc3339(&self.date_logged)
+            .map(|dt| dt.date_naive());
+        match logged {
+            Ok(date) => {
+                let today = chrono::Local::now().date_naive();
+                let days_since = (today - date).num_days();
+                days_since >= threshold
+            }
+            // If the date can't be parsed, assume not overdue rather than crashing.
+            Err(_) => false,
+        }
+    }
+}
+
+// Authenticates against Cognito using USER_PASSWORD_AUTH (direct credential flow,
+// no browser redirect). Returns the user's sub, which scopes all API calls
+// to their own data. Box<dyn Error> handles multiple possible error types.
 async fn cognito_login(email: &str, password: &str) -> Result<String, Box<dyn std::error::Error>> {
-    // build the request body
     let body = serde_json::json!({
         "AuthFlow": "USER_PASSWORD_AUTH",
-        "ClientId": "3isil38pk3rjglpvp0vse9q764",
+        "ClientId": "3isil38pk3rjglpvp0vse9q764", // identifies the app, not the user
         "AuthParameters": {
             "USERNAME": email,
             "PASSWORD": password
         }
     });
-    // send the POST request to Cognito
+
     let client = reqwest::Client::new();
     let response = client
         .post("https://cognito-idp.us-east-1.amazonaws.com/")
@@ -73,23 +103,29 @@ async fn cognito_login(email: &str, password: &str) -> Result<String, Box<dyn st
         .json(&body)
         .send()
         .await?;
-    // parse the response and extract the ID token
+
     let json: serde_json::Value = response.json().await?;
     let id_token = json["AuthenticationResult"]["IdToken"]
         .as_str()
         .ok_or("No IdToken in response")?;
-    // decode the ID token and extract the sub
+
+    // JWTs are three base64 sections separated by dots: header.payload.signature.
+    // The payload (index 1) contains identity claims including the sub.
     let payload = id_token.split('.').nth(1).ok_or("Invalid token format")?;
+    // JWTs use URL-safe base64 without padding.
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload)?;
     let claims: serde_json::Value = serde_json::from_slice(&decoded)?;
     let sub = claims["sub"].as_str().ok_or("No sub in token")?.to_string();
     Ok(sub)
 }
 
+// Creates a new care log entry in DynamoDB. Generates a fresh UUID and
+// today's date automatically so the caller only needs to supply the content.
 async fn log_care(plant_id: &str, care_type: &str, notes: &str) -> Result<(), reqwest::Error> {
     let log_id = uuid::Uuid::new_v4().to_string();
     let date_logged = chrono::Local::now().format("%Y-%m-%d").to_string();
 
+    // Field init shorthand: log_id and date_logged match their variable names.
     let care_log = CareLog {
         log_id,
         plant_id: plant_id.to_string(),
@@ -97,48 +133,45 @@ async fn log_care(plant_id: &str, care_type: &str, notes: &str) -> Result<(), re
         notes: notes.to_string(),
         date_logged,
     };
+
     let client = reqwest::Client::new();
     let response = client
         .post("https://xt71zwxu10.execute-api.us-east-1.amazonaws.com/carelogs")
         .json(&care_log)
         .send()
         .await?;
+
     if response.status().is_success() {
-    println!("Care log added successfully!");
+        println!("Care log added successfully!");
     } else {
         println!("Failed to add care log: {}", response.status());
     }
-
     Ok(())
 }
 
-// Fetches all plants belonging to a given userId from the live AWS backend.
-// async because it performs network I/O, which takes time and shouldn't
-// block the rest of the program while waiting.
-//
-// Returns a Result: either Ok(Vec<Plant>) on success, or an Err with
-// whatever reqwest::Error explains what went wrong (bad URL, network failure, etc).
+// Fetches all plants for a given userId. Returns a Vec<Plant> deserialized
+// from the JSON response. The ? operator propagates errors to the caller.
 async fn get_plants(user_id: &str) -> Result<Vec<Plant>, reqwest::Error> {
-
-    // Build the full request URL, inserting the userId into the query string.
     let url = format!("https://xt71zwxu10.execute-api.us-east-1.amazonaws.com/plants?userId={}", user_id);
-
-    // Send the GET request and wait (.await) for the response.
-    // The ? operator means: if this fails, stop here and return the error immediately.
     let response = reqwest::get(&url).await?;
-
-    // Parse the response body as JSON and deserialize it into a Vec<Plant>.
-    // serde matches each JSON object's fields to a Plant struct using the
-    // #[serde(rename = ...)] mappings defined above.
     let plants = response.json::<Vec<Plant>>().await?;
-
-    // Wrap the result in Ok to match this function's promised return type.
     Ok(plants)
 }
-// #[tokio::main] sets up the async runtime that allows main() to use .await.
-// Without it, Rust's plain fn main() can't run asynchronous code.
+
+// Fetches all care logs for a given plantId.
+// Used to check watering history and determine overdue status.
+async fn get_care_logs(plant_id: &str) -> Result<Vec<CareLog>, reqwest::Error> {
+    let url = format!("https://xt71zwxu10.execute-api.us-east-1.amazonaws.com/carelogs?plantId={}", plant_id);
+    let response = reqwest::get(&url).await?;
+    let logs = response.json::<Vec<CareLog>>().await?;
+    Ok(logs)
+}
+
+// tokio::main drives the async runtime so main() can use .await.
 #[tokio::main]
 async fn main() {
+    // flush() ensures prompts appear before the user starts typing,
+    // since print! doesn't add a newline to trigger automatic flushing.
     print!("Email: ");
     io::stdout().flush().unwrap();
     let mut email = String::new();
@@ -162,11 +195,9 @@ async fn main() {
 
     let result = get_plants(&sub).await;
 
-    // match checks whether the call succeeded (Ok) or failed (Err),
-    // and runs different code depending on which happened.
     match result {
         Ok(plants) => {
-            // Print plant list with care instructions
+            // Print plant list; conditional handles plants missing care instructions.
             for plant in &plants {
                 if plant.care_instructions.is_empty() {
                     println!("{} - Care Instructions: (none yet)", plant.display_name());
@@ -175,57 +206,94 @@ async fn main() {
                 }
             }
 
-            // Print numbered list for selection
+            // Numbered list for care log selection.
+            // enumerate() pairs each plant with a 0-based index; +1 makes it 1-based for display.
             println!("\n--- Log Care ---");
             for (i, plant) in plants.iter().enumerate() {
                 println!("{}.  {}", i + 1, plant.display_name());
             }
 
-            // Prompt user to select a plant by number
-            print!("\nSelect a plant number (or 0 to log for all plants): ");
+            // Optional logging: skip if the user just wants to check plant info.
+            print!("\nWould you like to log care for a plant? (y/n): ");
             io::stdout().flush().unwrap();
-            let mut selection = String::new();
-            io::stdin().read_line(&mut selection).expect("Failed to read selection");
-            let selection: usize = selection.trim().parse().unwrap_or(0);
+            let mut log_choice = String::new();
+            io::stdin().read_line(&mut log_choice).expect("Failed to read choice");
 
-            // Prompt for care type
-            print!("Care type (Watering, Fertilizing, Repotting, Pruning, Leaf Cleaning, Drama, Other): ");
-            io::stdout().flush().unwrap();
-            let mut care_type = String::new();
-            io::stdin().read_line(&mut care_type).expect("Failed to read care type");
-            let care_type = care_type.trim();
+            if log_choice.trim().to_lowercase() == "y" {
+                print!("\nSelect a plant number (or 0 to log for all plants): ");
+                io::stdout().flush().unwrap();
+                let mut selection = String::new();
+                io::stdin().read_line(&mut selection).expect("Failed to read selection");
+                // unwrap_or(0) handles non-numeric input gracefully.
+                let selection: usize = selection.trim().parse().unwrap_or(0);
 
-            // Prompt for optional notes
-            print!("Notes (optional, press Enter to skip): ");
-            io::stdout().flush().unwrap();
-            let mut notes = String::new();
-            io::stdin().read_line(&mut notes).expect("Failed to read notes");
-            let notes = notes.trim();
+                print!("Care type (Watering, Fertilizing, Repotting, Pruning, Leaf Cleaning, Drama, Other): ");
+                io::stdout().flush().unwrap();
+                let mut care_type = String::new();
+                io::stdin().read_line(&mut care_type).expect("Failed to read care type");
+                let care_type = care_type.trim();
 
-            // If 0, log care for all plants. Otherwise log for the selected plant.
-            if selection == 0 {
-                println!("Logging {} for all plants...", care_type);
-                for plant in &plants {
-                    match log_care(&plant.plant_id, care_type, notes).await {
-                        Ok(_) => println!("  ✓ {}", plant.display_name()),
-                        Err(e) => println!("  ✗ {} (failed: {})", plant.display_name(), e),
+                print!("Notes (optional, press Enter to skip): ");
+                io::stdout().flush().unwrap();
+                let mut notes = String::new();
+                io::stdin().read_line(&mut notes).expect("Failed to read notes");
+                let notes = notes.trim();
+
+                if selection == 0 {
+                    // log-all: loop over every plant, handle failures individually
+                    // so one failed write doesn't stop the rest from logging.
+                    println!("Logging {} for all plants...", care_type);
+                    for plant in &plants {
+                        match log_care(&plant.plant_id, care_type, notes).await {
+                            Ok(_) => println!("  ✓ {}", plant.display_name()),
+                            Err(e) => println!("  ✗ {} (failed: {})", plant.display_name(), e),
+                        }
                     }
+                    println!("Done! All plants logged.");
+                } else if selection >= 1 && selection <= plants.len() {
+                    // Vec is zero-indexed; subtract 1 to match the user's 1-based selection.
+                    let plant = &plants[selection - 1];
+                    match log_care(&plant.plant_id, care_type, notes).await {
+                        Ok(_) => println!("✓ Logged {} for {}.", care_type, plant.display_name()),
+                        Err(e) => println!("✗ Failed to log {} for {}: {}", care_type, plant.display_name(), e),
+                    }
+                } else {
+                    println!("Invalid selection.");
                 }
-                println!("Done! All plants logged.");
-            } else if selection >= 1 && selection <= plants.len() {
-                // Vec is zero-indexed, so subtract 1 to get the right plant
-                let plant = &plants[selection - 1];
-                match log_care(&plant.plant_id, care_type, notes).await {
-                    Ok(_) => println!("✓ Logged {} for {}.", care_type, plant.display_name()),
-                    Err(e) => println!("✗ Failed to log {} for {}: {}", care_type, plant.display_name(), e),
-                }
-            } else {
-                println!("Invalid selection.");
             }
         }
         Err(e) => {
-            // If the API call failed, print the error instead of crashing.
             println!("Error fetching plants: {}", e);
         }
+    }
+
+    // Check Andromeda's watering history and flag if overdue.
+    // Filters to Watering logs only since other care types don't reset the watering clock.
+    println!("\n--- Overdue Check ---");
+    match get_care_logs("3aebd792-3ec8-42dc-a985-59d75cb2bdcd").await {
+        Ok(logs) => {
+            if logs.is_empty() {
+                println!("No care logs found for Andromeda.");
+            } else {
+                // max_by on YYYY-MM-DD strings sorts correctly since the format is lexicographically ordered.
+                let most_recent = logs.iter()
+                    .filter(|log| log.care_type == "Watering")
+                    .max_by(|a, b| a.date_logged.cmp(&b.date_logged));
+                match most_recent {
+                    Some(log) => {
+                        let overdue = log.is_overdue();
+                        println!("Most recent care: {} on {}", log.care_type, log.date_logged);
+                        println!("Watering threshold: {} days", CareLog::watering_threshold());
+                        if overdue {
+                            println!("⚠ Andromeda is OVERDUE for care!");
+                        } else {
+                            println!("✓ Andromeda is on track.");
+                        }
+                    }
+                    None => println!("No watering logs found for Andromeda."),
+                }
+            }
+        }
+        Err(e) => println!("Failed to fetch care logs: {}", e),
     }
 }
