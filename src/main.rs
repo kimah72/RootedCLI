@@ -86,7 +86,10 @@ impl CareLog {
 // Authenticates against Cognito using USER_PASSWORD_AUTH (direct credential flow,
 // no browser redirect). Returns the user's sub, which scopes all API calls
 // to their own data. Box<dyn Error> handles multiple possible error types.
-async fn cognito_login(email: &str, password: &str) -> Result<String, Box<dyn std::error::Error>> {
+
+// Returns (sub, id_token): sub scopes the data queries,
+// id_token proves identity to the API Gateway authorizer.
+async fn cognito_login(email: &str, password: &str) -> Result<(String, String), Box<dyn std::error::Error>> {
     let body = serde_json::json!({
         "AuthFlow": "USER_PASSWORD_AUTH",
         "ClientId": "3isil38pk3rjglpvp0vse9q764", // identifies the app, not the user
@@ -117,12 +120,18 @@ async fn cognito_login(email: &str, password: &str) -> Result<String, Box<dyn st
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload)?;
     let claims: serde_json::Value = serde_json::from_slice(&decoded)?;
     let sub = claims["sub"].as_str().ok_or("No sub in token")?.to_string();
-    Ok(sub)
+    
+    // id_token is a &str borrowed from `json`, which is dropped when this
+    // function ends. .to_string() makes an owned copy that can outlive it.
+    Ok((sub, id_token.to_string()))
 }
 
 // Creates a new care log entry in DynamoDB. Generates a fresh UUID and
 // today's date automatically so the caller only needs to supply the content.
-async fn log_care(plant_id: &str, care_type: &str, notes: &str) -> Result<(), reqwest::Error> {
+
+// id_token is borrowed (&str) because log_care only reads it to build a
+// header, so there's no need to take ownership or clone it per call.
+async fn log_care(plant_id: &str, care_type: &str, notes: &str, id_token: &str) -> Result<(), reqwest::Error> {
     let log_id = uuid::Uuid::new_v4().to_string();
     let date_logged = chrono::Local::now().format("%Y-%m-%d").to_string();
 
@@ -138,6 +147,9 @@ async fn log_care(plant_id: &str, care_type: &str, notes: &str) -> Result<(), re
     let client = reqwest::Client::new();
     let response = client
         .post("https://xt71zwxu10.execute-api.us-east-1.amazonaws.com/carelogs")
+        // The API Gateway authorizer reads this header (its identity source),
+        // verifies the JWT, and only then lets the request reach the Lambda.
+        .header("Authorization", format!("Bearer {}", id_token))
         .json(&care_log)
         .send()
         .await?;
@@ -190,8 +202,9 @@ async fn main() {
         input.trim().to_string()
     });
 
-    let sub = match cognito_login(&email, &password).await {  // <-- this stays
-        Ok(s) => s,
+        // Destructure the tuple: first value → sub, second → id_token.
+    let (sub, id_token) = match cognito_login(&email, &password).await {
+        Ok((s, t)) => (s, t),
         Err(e) => {
             println!("Login failed. Please check your email and password and try again.");
             println!("(Error details: {})", e);
@@ -250,7 +263,7 @@ async fn main() {
                     // so one failed write doesn't stop the rest from logging.
                     println!("Logging {} for all plants...", care_type);
                     for plant in &plants {
-                        match log_care(&plant.plant_id, care_type, notes).await {
+                        match log_care(&plant.plant_id, care_type, notes, &id_token).await {
                             Ok(_) => println!("  ✓ {}", plant.display_name()),
                             Err(e) => println!("  ✗ {} (failed: {})", plant.display_name(), e),
                         }
@@ -259,7 +272,7 @@ async fn main() {
                 } else if selection >= 1 && selection <= plants.len() {
                     // Vec is zero-indexed; subtract 1 to match the user's 1-based selection.
                     let plant = &plants[selection - 1];
-                    match log_care(&plant.plant_id, care_type, notes).await {
+                    match log_care(&plant.plant_id, care_type, notes, &id_token).await {
                         Ok(_) => println!("✓ Logged {} for {}.", care_type, plant.display_name()),
                         Err(e) => println!("✗ Failed to log {} for {}: {}", care_type, plant.display_name(), e),
                     }
